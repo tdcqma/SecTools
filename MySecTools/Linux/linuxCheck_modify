@@ -1,0 +1,251 @@
+#! /bin/bash
+
+# Linux 服务器安全基线检测
+
+# 更新记录：
+# 	2017.09.25 完成初版编辑	by ***
+# 	2017.09.26 调通各个脚本检查项，添加检查类别与项目,并优化输出格式 by ***
+
+echo -e "\n\n		 ***** Linux server baseline scan *****		\n\n"
+
+# 设置hstory时间戳
+echo "[1] 设置hstory时间戳"
+histroy_time_user=`cat /etc/profile|grep HISTTIMEFORMAT`
+if [ ! -z "histroy_time_user" ];then
+ echo -e 'export HISTTIMEFORMAT="%F %T `whoami`" ' >> /etc/profile
+ echo -e  `source /etc/profile`
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#暂锁默认自带账户
+echo -e "[2] 暂锁默认自带账户\n"
+passwd -l dbus
+passwd -l vcsa
+passwd -l games
+passwd -l nobody
+passwd -l avahi
+passwd -l haldaemon
+passwd -l gopher
+passwd -l ftp
+passwd -l mailnull
+passwd -l mail
+passwd -l shutdown
+passwd -l halt
+passwd -l uucp
+passwd -l operator
+passwd -l sync
+passwd -l adm
+passwd -l lp
+echo -e  "\n     -----------\n      设置成功！\n     -----------\n"
+
+
+#设置密码复杂度，ucredit/lcredit大小写，ocredit标点符号，dcredit数字，retry输入次数，difok新旧重复度
+echo -e "[3] 设置密码复杂度\n"
+if [ -z "`cat /etc/pam.d/system-auth | grep -v "^#" | grep "pam_cracklib.so"`" ];then
+	sed -i '/password    required      pam_deny.so/a\password    required      pam_cracklib.so  try_first_pass minlen=8 ucredit=-1   lcredit=-1   ocredit=-1 dcredit=-1 retry=3 difok=5' /etc/pam.d/system-auth
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+
+#设置连续登录失败暂锁机制，deny最大次数，unlock_time解锁时间（秒），但根据/lib/security 实际情况来
+echo -e "[4] 设置连续登录失败暂锁机制\n"
+if [ -z "`cat /etc/pam.d/system-auth | grep -v "^#" | grep "pam_tally2.so"`" ];then
+	if [ -z "`cat /etc/pam.d/system-auth | grep -v "^#" | grep "pam_tally2.so" | grep auth`" ];then
+		sed -i '/auth	   include	system-auth/a\auth        required      pam_tally2.so deny=5 unlock_time=600 even_deny_root root_unlock_time=600' /etc/pam.d/system-auth
+	fi
+	if [ -z "`cat /etc/pam.d/system-auth | grep -v "^#" | grep "pam_tally2.so" | grep account`" ]; 
+	then
+		sed -i '/account    include      system-auth/a\account	required	pam_tally2.so' /etc/pam.d/system-auth
+	fi
+fi
+
+if [ -z "`cat /etc/pam.d/sshd | grep -v "^#" | grep "pam_tally2.so"`" ];then
+	if [ -z "`cat /etc/pam.d/sshd | grep -v "^#" | grep "pam_tally2.so" | grep auth`" ];then
+		sed -i '/auth        required      pam_deny.so/a\auth        required      pam_tally2.so deny=5 unlock_time=600 even_deny_root root_unlock_time=600' /etc/pam.d/sshd
+	fi
+	if [ -z "`cat /etc/pam.d/sshd | grep -v "^#" | grep "pam_tally2.so"` | grep account" ];then
+		sed -i '/account     required      pam_unix.so/a\account	required	pam_tally2.so' /etc/pam.d/sshd
+	fi
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#检查密码重复使用次数
+echo -e "[5] 检查密码重复使用次数\n"
+if [ -z "`cat /etc/pam.d/system-auth | grep password | grep remember`" ];then
+	sed -i '/password    sufficient    pam_unix.so/s/$/& remember=5/' /etc/pam.d/system-auth
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#设置操作超时锁定
+echo -e "[6] 设置操作超时锁定\n"
+if [ -z "`cat /etc/profile | grep -v "^#" | grep TMOUT`" ];then
+	echo -e "\nexport TMOUT=1800" >> /etc/profile
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+
+#修改密码时效
+echo -e "[7] 设置修改密码时效\n"
+sed -i '/PASS_WARN_AGE/s/7/10/' /etc/login.defs 
+sed -i '/PASS_MIN_LEN/s/5/8/' /etc/login.defs
+#sed -i '/PASS_MAX_DAYS/s/99999/90/' /etc/login.defs
+sed -i '/PASS_MIN_DAYS/s/0/6/' /etc/login.defs
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#修改默认访问权限
+echo -e "[8] 设置修改默认访问权限\n"
+sed -i '/UMASK/s/077/027/' /etc/login.defs
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#设置重要文件目录权限
+echo -e "[9] 设置修改重要文件目录权限\n"
+chmod 644 /etc/passwd	
+chmod 600 /etc/xinetd.conf &>/dev/null
+chmod 600 /etc/inetd.conf &>/dev/null	
+chmod 644 /etc/group &>/dev/null
+chmod 000 /etc/shadow &>/dev/null
+chmod 644 /etc/services &>/dev/null
+chmod 600 /etc/security &>/dev/null
+chmod 750 /etc/ &>/dev/null	#启动了nscd服务导致设置权限以后无法登陆
+chmod 750 /etc/rc6.d &>/dev/null
+chmod 750 /tmp &>/dev/null
+chmod 750 /etc/rc0.d/ &>/dev/null
+chmod 750 /etc/rc1.d/ &>/dev/null
+chmod 750 /etc/rc2.d/ &>/dev/null
+chmod 750 /etc/rc4.d &>/dev/null
+chmod 750 /etc/rc5.d/ &>/dev/null
+chmod 750 /etc/rc3.d	
+chmod 750 /etc/rc.d/init.d/	
+chmod 600 /etc/grub.conf
+chmod 600 /boot/grub/grub.conf
+chmod 600 /etc/lilo.conf &>/dev/null
+chmod 700 /bin/ping
+chmod 700 /usr/bin/finger &>/dev/null
+chmod 700 /usr/bin/who
+chmod 700 /usr/bin/w
+chmod 700 /usr/bin/locate
+chmod 700 /usr/bin/whereis
+chmod 700 /sbin/ifconfig
+chmod 700 /usr/bin/pico &>/dev/null
+chmod 700 /bin/vi
+chmod 700 /usr/bin/which
+chmod 700 /usr/bin/gcc
+chmod 700 /usr/bin/make
+chmod 700 /bin/rpm
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#检查用户umask设置
+echo -e "[10] 设置修改用户umask配置\n"
+sed -i '/umask/s/002/077/' /etc/csh.cshrc
+sed -i '/umask/s/002/077/' /etc/bashrc
+sed -i '/umask/s/002/077/' /etc/profile
+csh_login=`cat /etc/csh.login | grep -i "umask"`
+if [ -z "$csh_login" ];then
+	echo -e "/numask 077" >>/etc/csh.login
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#检查是否设置ssh登录前告警banner
+echo -e "[11] 设置SSH登录前告警Banner\n"
+sshbanner="/etc/ssh_banner"
+if [ ! -f "$sshbanner" ];then
+	touch /etc/ssh_banner
+	chown bin:bin /etc/ssh_banner
+	chmod 644 /etc/ssh_banner
+	echo -e "Authorized only.All activity will be monitored and reported" > /etc/ssh_banner
+	echo -e "Banner /etc/ssh_banner" >> /etc/ssh/sshd_config
+	/etc/init.d/sshd restart
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#设置最大失败尝试登陆次数
+echo -e "[12] 设置最大失败尝试登录次数\n"
+sed -i "s/#MaxAuthTries 6/MaxAuthTries 6/" /etc/ssh/sshd_config
+#使用dns反向解析
+sed -i "s/#UseDNS yes/UseDNS no/" /etc/ssh/sshd_config
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#FTP关闭
+echo -e "[13] 设置关闭FTP\n"
+ftpstatus= echo -e "`/etc/init.d/vsftpd status`|grep stop"
+if [ ! -z "ftpstatus" ];then
+ echo -e `/etc/init.d/vsftpd stop`
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#检查重要文件属性设置
+echo -e "[14] 设置重要文件属性\n"
+chattr +i /etc/passwd
+chattr +i /etc/shadow
+chattr +i /etc/group
+chattr +i /etc/gshadow
+chattr +a /root/.bash_history
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#审计服务开启
+echo -e "[15] 设置开启审计服务\n"
+log_auditd= echo -e "`/etc/init.d/auditd status`|grep stop"
+if [ ! -z "log_auditd" ];then
+ echo -e `/etc/init.d/auditd start`
+fi
+echo -e  "     -----------流量\n      设置成功！\n     -----------\n"
+
+#日志审计设置
+echo -e "[16] 设置日志审计\n"
+if [ ! -f "/etc/rsyslog.conf" ] && [ ! -f "/etc/syslog.conf" ] && [ ! -f "/etc/syslog-ng/syslog-ng.conf" ];then
+	echo "{tput setaf 1}syslog not installed!!!${tput sgr0}"
+	exit
+fi
+
+if [ ! -f "/var/log/cron" ];then
+	touch /var/log/cron
+	chmod 775 /var/log/cron
+fi
+
+if [ ! -f "/var/adm/messages" ];then
+	mkdir /var/adm
+	touch /var/adm/messages
+	chmod 666 /var/adm/messages
+fi
+
+if [ -f "/etc/rsyslog.conf" ];then
+	if [ -z "`cat /etc/rsyslog.conf | grep "^cron.*" | grep "/var/log/cron"`" ];then
+		echo -e "cron.*        /var/log/cron" >> /etc/rsyslog.conf
+	fi
+	if [ -z "`cat /etc/rsyslog.conf | grep "/var/adm/messages"`" ];then
+		echo -e "*.err;kern.debug;daemon.notice   /var/adm/messages" >>/etc/rsyslog.conf
+	fi
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+
+#禁止wheel组以外的用户su为root
+echo -e "[17] 设置禁止wheel组以外的用户su为root\n"
+if [ -z "`cat /etc/pam.d/su | grep -v "^#" | grep pam_wheel.so`" ];then
+	if [ -z "`cat /etc/pam.d/su | grep -v "^#" | grep pam_rootok.so`" ];then
+		sed -i 'auth            sufficient      pam_rootok.so' /etc/pam.d/su
+		sed -i '/
+		pam_rootok.so/a\auth            required        pam_wheel.so group=wheel' /etc/pam.d/su
+	else
+		sed -i '/pam_rootok.so/a\auth            required        pam_wheel.so group=wheel' /etc/pam.d/su
+	fi
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+
+#禁止core dump 设置
+echo -e "[18] 设置禁止coredump\n"
+chk_core=`grep core /etc/security/limits.conf | grep -v "^#"`
+if [ -z "$chk_core" ];then
+	echo "*               soft    core            0"  >> /etc/security/limits.conf
+	echo "*               hard    core            0"  >> /etc/security/limits.conf
+fi
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+#uid和sgid权限文件并修改文件权限为755
+echo -e "[19] 设置uid和sgid权限文件\n"
+find /usr/bin/chage /usr/bin/gpasswd /usr/bin/wall /usr/bin/chfn /usr/bin/chsh /usr/bin/newgrp /usr/bin/write /usr/sbin/usernetctl /bin/mount /bin/umount /bin/ping /sbin/netreport -type f -perm /600 | xargs chmod 755 /usr/bin/chage /usr/bin/gpasswd /usr/bin/wall /usr/bin/chfn /usr/bin/chsh /usr/bin/newgrp /usr/bin/write /usr/sbin/usernetctl /bin/mount /bin/umount /bin/ping /sbin/netreport
+echo -e  "     -----------\n      设置成功！\n     -----------\n"
+
+
+echo -e "		--All scan is over--		\n"
